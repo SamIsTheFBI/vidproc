@@ -27,3 +27,7 @@ go.work
 # End of https://www.toptal.com/developers/gitignore/api/go
 "
 "
+videopipeline.db
+videopipeline.db-shm
+videopipeline.db-wal
+.DS_Store
