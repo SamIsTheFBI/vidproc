@@ -18,16 +18,55 @@ const (
 )
 
 type Queue struct {
-	store  *Store
-	jobs   chan Job
-	wg     sync.WaitGroup
-	cancel context.CancelFunc
+	store       *Store
+	jobs        chan Job
+	wg          sync.WaitGroup
+	cancel      context.CancelFunc
+	mu          sync.RWMutex
+	subscribers map[string][]chan transcoder.Progress
 }
 
 func New(store *Store) *Queue {
 	return &Queue{
-		store: store,
-		jobs:  make(chan Job, queueBuffer),
+		store:       store,
+		jobs:        make(chan Job, queueBuffer),
+		subscribers: make(map[string][]chan transcoder.Progress),
+	}
+}
+
+func (q *Queue) Subscribe(jobID string) (<-chan transcoder.Progress, func()) {
+	ch := make(chan transcoder.Progress, 20)
+
+	q.mu.Lock()
+	q.subscribers[jobID] = append(q.subscribers[jobID], ch)
+	q.mu.Unlock()
+
+	cancel := func() {
+		q.mu.Lock()
+		defer q.mu.Unlock()
+		subs := q.subscribers[jobID]
+		for i, s := range subs {
+			if s == ch {
+				q.subscribers[jobID] = append(subs[:i], subs[i+1:]...)
+				break
+			}
+		}
+
+		close(ch)
+	}
+
+	return ch, cancel
+}
+
+func (q *Queue) broadcast(p transcoder.Progress) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	for _, ch := range q.subscribers[p.JobID] {
+		select {
+		case ch <- p:
+		default:
+		}
 	}
 }
 
@@ -37,7 +76,8 @@ func (q *Queue) runTranscode(ctx context.Context, job Job) error {
 	)
 
 	go func() {
-		for range progress {
+		for p := range progress {
+			q.broadcast(p)
 		}
 	}()
 

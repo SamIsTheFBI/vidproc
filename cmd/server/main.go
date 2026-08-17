@@ -2,15 +2,22 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
+	"video-processing/internal/api"
 	"video-processing/internal/queue"
 )
 
 func main() {
+	outDir := "./data"
+	if err := os.MkdirAll(outDir+"/uploads", 0755); err != nil {
+		log.Fatalf("create dirs: %v", err)
+	}
+
 	store, err := queue.NewStore("./videopipeline.db")
 	if err != nil {
 		log.Fatalf("open store: %v", err)
@@ -23,49 +30,30 @@ func main() {
 		log.Fatalf("start queue: %v", err)
 	}
 
-	if len(os.Args) < 3 {
-		fmt.Fprintln(os.Stderr, "usage: server <input.mp4> <output.mp4>")
-		os.Exit(1)
+	h := &api.Handler{Queue: q, Store: store, OutDir: outDir}
+
+	srv := &http.Server{
+		Addr:    ":8080",
+		Handler: h.Routes(),
 	}
 
-	input := os.Args[1]
-	output := os.Args[2]
+	go func() {
+		log.Println("listening on :8080")
+		if err := srv.ListenAndServe(); err != http.ErrServerClosed {
+			log.Fatalf("http server: %v", err)
+		}
+	}()
 
-	jobID, err := q.Submit(input, output)
-	if err != nil {
-		log.Fatalf("submit: %v", err)
-	}
-	log.Printf("submitted job %s", jobID)
-
-	// Block until shutdown signal
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	log.Println("shutting down gracefully...")
+	log.Println("shutting down...")
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	srv.Shutdown(shutdownCtx)
+
 	q.Shutdown()
 	log.Println("done")
-
-	// // 30min timeout
-	// ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
-	// defer cancel()
-
-	// log.Printf("transcoding %s → %s (3 renditions concurrently)", input, output)
-
-	// progress, errs := transcoder.TranscodeAll(ctx, input, output, transcoder.DefaultRenditions)
-
-	// for p := range progress {
-	// 	if p.Done {
-	// 		log.Printf("[%s] done", p.JobID)
-	// 	} else {
-	// 		log.Printf("[%s] frame=%d fps=%.1f speed=%.2fx bitrate=%s",
-	// 			p.JobID, p.Frame, p.FPS, p.Speed, p.Bitrate)
-	// 	}
-	// }
-
-	// for err := range errs {
-	// 	log.Printf("error: %v", err)
-	// }
-
-	// log.Println("all renditions complete")
 }

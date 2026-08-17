@@ -3,15 +3,17 @@ package transcoder
 import (
 	"context"
 	"fmt"
+	"log"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"sync"
 )
 
 type Rendition struct {
-	Name string // "720p"
-	Width int
-	Height int
+	Name    string // "720p"
+	Width   int
+	Height  int
 	Bitrate string // "2500k"
 }
 
@@ -32,7 +34,7 @@ func TranscodeAll(ctx context.Context, inputPath string, outputDir string, rendi
 		go func(r Rendition) {
 			defer wg.Done()
 
-			outputPath := filepath.Join(outputDir, fmt.Sprintf("output_%s.mp4", r.Name))
+			outputPath := filepath.Join(outputDir, filepath.Base(inputPath), fmt.Sprintf("output_%s.mp4", r.Name))
 
 			if err := transcodeOne(ctx, inputPath, outputPath, r, progress); err != nil {
 				errs <- fmt.Errorf("rendition %s: %w", r.Name, err)
@@ -49,19 +51,23 @@ func TranscodeAll(ctx context.Context, inputPath string, outputDir string, rendi
 	return progress, errs
 }
 
-func transcodeOne(ctx context.Context, inputPath string, outputPath string, r Rendition, out chan<-Progress) (error) {
+func transcodeOne(ctx context.Context, inputPath string, outputPath string, r Rendition, out chan<- Progress) error {
+	if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
+		return fmt.Errorf("create output dir: %w", err)
+	}
+
 	cmd := exec.CommandContext(ctx, "ffmpeg",
-		"-y",                    // overwrite output without asking
-        "-i", inputPath,
-        "-vf", fmt.Sprintf("scale=%d:%d", r.Width, r.Height),
-        "-c:v", "libx264",
-        "-preset", "fast",
-        "-b:v", r.Bitrate,
-        "-c:a", "aac",
-        "-b:a", "128k",
-        "-progress", "pipe:2",   // write progress key=values to stderr
-        "-nostats",              // suppress the default stats output
-        outputPath,
+		"-y", // overwrite output without asking
+		"-i", inputPath,
+		"-vf", fmt.Sprintf("scale=%d:%d", r.Width, r.Height),
+		"-c:v", "libx264",
+		"-preset", "fast",
+		"-b:v", r.Bitrate,
+		"-c:a", "aac",
+		"-b:a", "128k",
+		"-progress", "pipe:2", // write progress key=values to stderr
+		"-nostats", // suppress the default stats output
+		outputPath,
 	)
 
 	stderrPipe, err := cmd.StderrPipe()
@@ -69,6 +75,7 @@ func transcodeOne(ctx context.Context, inputPath string, outputPath string, r Re
 		return fmt.Errorf("stderr pipe: %w", err)
 	}
 
+	log.Printf("[ffmpeg/%s] running: ffmpeg %v", r.Name, cmd.Args)
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start ffmpeg: %w", err)
 	}
