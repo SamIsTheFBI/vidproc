@@ -10,6 +10,7 @@ import (
 	"time"
 	"video-processing/internal/api"
 	"video-processing/internal/queue"
+	"video-processing/internal/transcriber"
 )
 
 func main() {
@@ -23,7 +24,12 @@ func main() {
 		log.Fatalf("open store: %v", err)
 	}
 
-	q := queue.New(store)
+	tc := &transcriber.Config{
+		WhisperBin: "/Users/samisthefbi/code/whisper.cpp/build/bin/whisper-cli",
+		ModelPath:  "./Users/samisthefbi/code/whisper.cpp/models/ggml-base.en.bin",
+	}
+
+	q := queue.New(store, tc)
 
 	ctx := context.Background()
 	if err := q.Start(ctx); err != nil {

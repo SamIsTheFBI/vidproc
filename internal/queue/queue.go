@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"path/filepath"
 	"sync"
 	"time"
 	"video-processing/internal/transcoder"
+	"video-processing/internal/transcriber"
 
 	"github.com/google/uuid"
 )
@@ -24,13 +26,15 @@ type Queue struct {
 	cancel      context.CancelFunc
 	mu          sync.RWMutex
 	subscribers map[string][]chan transcoder.Progress
+	transcriber *transcriber.Config
 }
 
-func New(store *Store) *Queue {
+func New(store *Store, tc *transcriber.Config) *Queue {
 	return &Queue{
 		store:       store,
 		jobs:        make(chan Job, queueBuffer),
 		subscribers: make(map[string][]chan transcoder.Progress),
+		transcriber: tc,
 	}
 }
 
@@ -84,6 +88,30 @@ func (q *Queue) runTranscode(ctx context.Context, job Job) error {
 	for err := range errs {
 		if err != nil {
 			return err
+		}
+	}
+
+	if q.transcriber != nil {
+		result, err := transcriber.Transcribe(ctx, *q.transcriber, job.InputPath, job.OutputDir)
+		if err != nil {
+			// transcription failure is non-fatal — log and continue
+			log.Printf("job %s: transcription failed (continuing): %v", job.ID, err)
+			return nil
+		}
+
+		log.Printf("job %s: transcribed %d segments", job.ID, len(result.Segments))
+
+		for _, r := range transcoder.DefaultRenditions {
+			videoPath := filepath.Join(job.OutputDir,
+				filepath.Base(job.InputPath),
+				fmt.Sprintf("output_%s.mp4", r.Name))
+			subtitledPath := filepath.Join(job.OutputDir,
+				filepath.Base(job.InputPath),
+				fmt.Sprintf("output_%s_subtitled.mp4", r.Name))
+
+			if err := transcriber.EmbedSubtitles(ctx, videoPath, result.SRTPath, subtitledPath); err != nil {
+				log.Printf("job %s: embed subtitles %s failed: %v", job.ID, r.Name, err)
+			}
 		}
 	}
 

@@ -23,6 +23,7 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("GET /jobs/{id}", h.handleJobStatus)
 	mux.HandleFunc("GET /jobs/{id}/progress", h.handleProgress)
 	mux.HandleFunc("GET /videos/{id}/{rendition}", h.handleVideoServe)
+	mux.HandleFunc("GET /jobs/{id}/transcript", h.handleTranscript)
 	return mux
 }
 
@@ -138,4 +139,17 @@ func (h *Handler) handleProgress(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+}
+
+func (h *Handler) handleTranscript(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	job, err := h.Store.GetJob(id)
+	if err != nil {
+		http.Error(w, "job not found", http.StatusNotFound)
+		return
+	}
+
+	srtPath := filepath.Join(job.OutputDir, "audio.wav.srt")
+	http.ServeFile(w, r, srtPath)
 }
