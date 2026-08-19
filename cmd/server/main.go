@@ -13,6 +13,13 @@ import (
 	"video-processing/internal/transcriber"
 )
 
+func getEnv(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
 func main() {
 	outDir := "./data"
 	if err := os.MkdirAll(outDir+"/uploads", 0755); err != nil {
@@ -25,8 +32,8 @@ func main() {
 	}
 
 	tc := &transcriber.Config{
-		WhisperBin: "/Users/samisthefbi/code/whisper.cpp/build/bin/whisper-cli",
-		ModelPath:  "./Users/samisthefbi/code/whisper.cpp/models/ggml-base.en.bin",
+		WhisperBin: getEnv("WHISPER_BIN", "/whisper.cpp/build/bin/whisper-cli"),
+		ModelPath:  getEnv("WHISPER_MODEL", "code/whisper.cpp/models/ggml-base.en.bin"),
 	}
 
 	q := queue.New(store, tc)

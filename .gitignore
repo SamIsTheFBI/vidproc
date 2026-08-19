@@ -32,3 +32,4 @@ videopipeline.db-shm
 videopipeline.db-wal
 .DS_Store
 data/
+.env

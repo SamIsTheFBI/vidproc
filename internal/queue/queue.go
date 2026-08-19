@@ -92,7 +92,9 @@ func (q *Queue) runTranscode(ctx context.Context, job Job) error {
 	}
 
 	if q.transcriber != nil {
-		result, err := transcriber.Transcribe(ctx, *q.transcriber, job.InputPath, job.OutputDir)
+		jobOutputDir := filepath.Join(job.OutputDir, filepath.Base(job.InputPath))
+
+		result, err := transcriber.Transcribe(ctx, *q.transcriber, job.InputPath, jobOutputDir)
 		if err != nil {
 			// transcription failure is non-fatal — log and continue
 			log.Printf("job %s: transcription failed (continuing): %v", job.ID, err)
@@ -102,11 +104,9 @@ func (q *Queue) runTranscode(ctx context.Context, job Job) error {
 		log.Printf("job %s: transcribed %d segments", job.ID, len(result.Segments))
 
 		for _, r := range transcoder.DefaultRenditions {
-			videoPath := filepath.Join(job.OutputDir,
-				filepath.Base(job.InputPath),
+			videoPath := filepath.Join(jobOutputDir,
 				fmt.Sprintf("output_%s.mp4", r.Name))
-			subtitledPath := filepath.Join(job.OutputDir,
-				filepath.Base(job.InputPath),
+			subtitledPath := filepath.Join(jobOutputDir,
 				fmt.Sprintf("output_%s_subtitled.mp4", r.Name))
 
 			if err := transcriber.EmbedSubtitles(ctx, videoPath, result.SRTPath, subtitledPath); err != nil {

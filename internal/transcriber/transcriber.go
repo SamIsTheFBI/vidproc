@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -56,7 +57,6 @@ func Transcribe(ctx context.Context, cfg Config, videoPath, outputDir string) (*
 		"-m", cfg.ModelPath,
 		"-f", wavPath,
 		"-osrt", // output SRT format
-		"--output-dir", outputDir,
 	)
 
 	stderrPipe, err := cmd.StderrPipe()
@@ -79,7 +79,13 @@ func Transcribe(ctx context.Context, cfg Config, videoPath, outputDir string) (*
 		return nil, fmt.Errorf("whisper failed: %w", err)
 	}
 
-	srtPath := filepath.Join(outputDir, "audio.wav.srt")
+	// DEBUG: list everything in outputDir so we can see what whisper actually wrote
+	entries, _ := os.ReadDir(outputDir)
+	log.Printf("[whisper] files in %s:", outputDir)
+	for _, e := range entries {
+		log.Printf("[whisper]   %s", e.Name())
+	}
+	srtPath := wavPath + ".srt"
 	segments, err := parseSRT(srtPath)
 	if err != nil {
 		return nil, fmt.Errorf("parse srt: %w", err)
