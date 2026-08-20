@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -22,7 +21,7 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("POST /upload", h.handleUpload)
 	mux.HandleFunc("GET /jobs/{id}", h.handleJobStatus)
 	mux.HandleFunc("GET /jobs/{id}/progress", h.handleProgress)
-	mux.HandleFunc("GET /videos/{id}/{rendition}", h.handleVideoServe)
+	mux.HandleFunc("GET /videos/{id}/{file...}", h.handleVideoServe)
 	mux.HandleFunc("GET /jobs/{id}/transcript", h.handleTranscript)
 	return mux
 }
@@ -81,26 +80,32 @@ func (h *Handler) handleJobStatus(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) handleVideoServe(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	rendition := r.PathValue("rendition") // 1080p, 720p, 480p
 
-	videoPath := filepath.Join(h.OutDir, "processed", id, fmt.Sprintf("output_%s.mp4", rendition))
+	// file is everything after /videos/{id}/
+	// e.g. /videos/{id}/master.m3u8
+	//      /videos/{id}/720p/index.m3u8
+	//      /videos/{id}/720p/segment_001.ts
+	filePath := r.PathValue("file")
 
-	f, err := os.Open(videoPath)
-	log.Printf("video path: %s", videoPath)
+	job, err := h.Store.GetJob(id)
 	if err != nil {
-		http.Error(w, "video not found", http.StatusNotFound)
-		return
-	}
-	defer f.Close()
-
-	stat, err := f.Stat()
-	if err != nil {
-		http.Error(w, "could not stat file", http.StatusInternalServerError)
+		http.Error(w, "job not found", http.StatusNotFound)
 		return
 	}
 
-	w.Header().Set("Content-Type", "video/mp4")
-	http.ServeContent(w, r, stat.Name(), stat.ModTime(), f)
+	jobOutputDir := filepath.Join(h.OutDir, "processed", filepath.Base(job.InputPath))
+	fullPath := filepath.Join(jobOutputDir, filePath)
+
+	switch filepath.Ext(filePath) {
+	case ".m3u8":
+		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+	case ".ts":
+		w.Header().Set("Content-Type", "video/mp2t")
+	case ".vtt":
+		w.Header().Set("Content-Type", "text/vtt")
+	}
+
+	http.ServeFile(w, r, fullPath)
 }
 
 func (h *Handler) handleProgress(w http.ResponseWriter, r *http.Request) {
@@ -150,6 +155,6 @@ func (h *Handler) handleTranscript(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	srtPath := filepath.Join(job.OutputDir, "audio.wav.srt")
+	srtPath := filepath.Join(job.OutputDir, filepath.Base(job.InputPath), "audio.wav.vtt")
 	http.ServeFile(w, r, srtPath)
 }

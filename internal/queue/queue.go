@@ -55,8 +55,6 @@ func (q *Queue) Subscribe(jobID string) (<-chan transcoder.Progress, func()) {
 				break
 			}
 		}
-
-		close(ch)
 	}
 
 	return ch, cancel
@@ -74,13 +72,25 @@ func (q *Queue) broadcast(p transcoder.Progress) {
 	}
 }
 
+func (q *Queue) closeSubscribers(jobID string) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for _, ch := range q.subscribers[jobID] {
+		close(ch)
+	}
+	delete(q.subscribers, jobID)
+}
+
 func (q *Queue) runTranscode(ctx context.Context, job Job) error {
+	jobOutputDir := filepath.Join(job.OutputDir, filepath.Base(job.InputPath))
+
 	progress, errs := transcoder.TranscodeAll(
-		ctx, job.InputPath, job.OutputDir, transcoder.DefaultRenditions,
+		ctx, job.InputPath, jobOutputDir, transcoder.DefaultRenditions,
 	)
 
 	go func() {
 		for p := range progress {
+			p.JobID = job.ID
 			q.broadcast(p)
 		}
 	}()
@@ -91,41 +101,39 @@ func (q *Queue) runTranscode(ctx context.Context, job Job) error {
 		}
 	}
 
+	var srtPath string
 	if q.transcriber != nil {
-		jobOutputDir := filepath.Join(job.OutputDir, filepath.Base(job.InputPath))
-
 		result, err := transcriber.Transcribe(ctx, *q.transcriber, job.InputPath, jobOutputDir)
 		if err != nil {
-			// transcription failure is non-fatal — log and continue
 			log.Printf("job %s: transcription failed (continuing): %v", job.ID, err)
-			return nil
-		}
-
-		log.Printf("job %s: transcribed %d segments", job.ID, len(result.Segments))
-
-		for _, r := range transcoder.DefaultRenditions {
-			videoPath := filepath.Join(jobOutputDir,
-				fmt.Sprintf("output_%s.mp4", r.Name))
-			subtitledPath := filepath.Join(jobOutputDir,
-				fmt.Sprintf("output_%s_subtitled.mp4", r.Name))
-
-			if err := transcriber.EmbedSubtitles(ctx, videoPath, result.SRTPath, subtitledPath); err != nil {
-				log.Printf("job %s: embed subtitles %s failed: %v", job.ID, r.Name, err)
-			}
+		} else {
+			log.Printf("job %s: transcribed %d segments", job.ID, len(result.Segments))
+			srtPath = result.SubtitlePath
 		}
 	}
 
+	if srtPath != "" {
+		if err := transcoder.WriteSubtitlePlaylist(jobOutputDir, srtPath); err != nil {
+			log.Printf("job %s: subtitle playlist failed: %v", job.ID, err)
+			srtPath = "" // don't reference it in master if it failed
+		}
+	}
+
+	if err := transcoder.WriteMasterPlaylist(jobOutputDir, transcoder.DefaultRenditions, srtPath); err != nil {
+		return fmt.Errorf("master playlist: %w", err)
+	}
+
+	log.Printf("job %s: HLS output ready at %s/master.m3u8", job.ID, jobOutputDir)
 	return nil
 }
 
 func (q *Queue) processWithRetry(ctx context.Context, job Job, workerId int) {
 	log.Printf("worker %d: starting job %s", workerId, job.ID)
 	q.store.UpdateStatus(job.ID, StatusRunning, "")
+	defer q.closeSubscribers(job.ID)
 
-	// todo
 	for a := 0; a <= maxRetries; a++ {
 		if a > 0 {
-			// exponential backoff
 			wait := time.Duration(1<<a) * time.Second
 			log.Printf("worker %d: retrying job %s in %s (attempt %d/%d)",
 				workerId, job.ID, wait, a, maxRetries,
@@ -149,7 +157,7 @@ func (q *Queue) processWithRetry(ctx context.Context, job Job, workerId int) {
 		log.Printf("worker %d: job %s attempt %d failed: %v", workerId, job.ID, a+1, err)
 	}
 
-	q.store.UpdateStatus(job.ID, StatusFailed, fmt.Sprintf("failed after %d attempts", maxRetries))
+	q.store.UpdateStatus(job.ID, StatusFailed, fmt.Sprintf("failed after %d attempts", maxRetries+1))
 	log.Printf("worker %d: job %s permanently failed", workerId, job.ID)
 }
 

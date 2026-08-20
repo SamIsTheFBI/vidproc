@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -23,8 +22,8 @@ type Segment struct {
 }
 
 type Result struct {
-	Segments []Segment
-	SRTPath  string
+	Segments     []Segment
+	SubtitlePath string
 }
 
 func extractAudio(ctx context.Context, videoPath, outputDir string) (string, error) {
@@ -56,7 +55,7 @@ func Transcribe(ctx context.Context, cfg Config, videoPath, outputDir string) (*
 	cmd := exec.CommandContext(ctx, cfg.WhisperBin,
 		"-m", cfg.ModelPath,
 		"-f", wavPath,
-		"-osrt", // output SRT format
+		"-ovtt", // output VTT format
 	)
 
 	stderrPipe, err := cmd.StderrPipe()
@@ -79,22 +78,16 @@ func Transcribe(ctx context.Context, cfg Config, videoPath, outputDir string) (*
 		return nil, fmt.Errorf("whisper failed: %w", err)
 	}
 
-	// DEBUG: list everything in outputDir so we can see what whisper actually wrote
-	entries, _ := os.ReadDir(outputDir)
-	log.Printf("[whisper] files in %s:", outputDir)
-	for _, e := range entries {
-		log.Printf("[whisper]   %s", e.Name())
-	}
-	srtPath := wavPath + ".srt"
-	segments, err := parseSRT(srtPath)
+	vttPath := wavPath + ".vtt"
+	segments, err := parseVTT(vttPath)
 	if err != nil {
-		return nil, fmt.Errorf("parse srt: %w", err)
+		return nil, fmt.Errorf("parse vtt: %w", err)
 	}
 
-	return &Result{Segments: segments, SRTPath: srtPath}, nil
+	return &Result{Segments: segments, SubtitlePath: vttPath}, nil
 }
 
-func parseSRT(path string) ([]Segment, error) {
+func parseVTT(path string) ([]Segment, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("open srt: %w", err)

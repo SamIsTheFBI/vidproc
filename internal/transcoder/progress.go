@@ -10,19 +10,20 @@ import (
 )
 
 type Progress struct {
-	JobID   string
-	Frame   int
-	FPS     float64
-	Speed   float64
-	Bitrate string
-	OutTime time.Duration
-	Done    bool
+	JobID     string
+	Rendition string
+	Frame     int
+	FPS       float64
+	Speed     float64
+	Bitrate   string
+	OutTime   time.Duration
+	Done      bool
 }
 
-func parseProgress(jobID string, stderr io.Reader, out chan<- Progress) {
+func parseProgress(rendition string, stderr io.Reader, out chan<- Progress) {
 	scanner := bufio.NewScanner(stderr)
 	var cur Progress
-	cur.JobID = jobID
+	cur.Rendition = rendition
 
 	for scanner.Scan() {
 		key, val, ok := strings.Cut(scanner.Text(), "=")
@@ -43,7 +44,7 @@ func parseProgress(jobID string, stderr io.Reader, out chan<- Progress) {
 		case "progress":
 			cur.Done = strings.TrimSpace(val) == "end"
 			out <- cur
-			cur = Progress{JobID: jobID}
+			cur = Progress{Rendition: rendition}
 		}
 	}
 
